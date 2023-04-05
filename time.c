@@ -123,7 +123,7 @@ generating an exception.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #ifdef HAVE_EXECINFO_H
-#define BACKTRACE 1
+#define BACKTRACE 0
 
 #if BACKTRACE
 #include <execinfo.h>
@@ -154,6 +154,11 @@ print_trace (void)
   }
 
   free(strings);
+}
+#else /*BACKTRACE*/
+static void
+print_trace (void) {
+  Sdprintf("print_trace is not available on Android due to the unavailability of backtrace.\n");
 }
 #endif /*BACKTRACE*/
 #endif /*HAVE_EXECINFO_H*/
