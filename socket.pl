@@ -49,12 +49,12 @@
             tcp_fcntl/3,                % +Socket, +Command, ?Arg
             tcp_setopt/2,               % +Socket, +Option
             tcp_getopt/2,               % +Socket, ?Option
-	    host_address/3,		% ?HostName, ?Address, +Options
+            host_address/3,		% ?HostName, ?Address, +Options
             tcp_host_to_address/2,      % ?HostName, ?Ip-nr
             tcp_select/3,               % +Inputs, -Ready, +Timeout
             gethostname/1,              % -HostName
 
-	    ip_name/2,			% ?Ip, ?Name
+            ip_name/2,			% ?Ip, ?Name
 
             tcp_open_socket/2,          % +Socket, -StreamPair
 
@@ -64,12 +64,15 @@
 
             negotiate_socks_connection/2% +DesiredEndpoint, +StreamPair
           ]).
-:- autoload(library(debug), [assertion/1, debug/3]).
+:- use_module(library(debug), [assertion/1, debug/3]).
 :- autoload(library(lists), [last/2, member/2, append/3, append/2]).
 :- autoload(library(apply), [maplist/3, maplist/2]).
 :- autoload(library(error),
             [instantiation_error/1, syntax_error/1, must_be/2, domain_error/2]).
 :- autoload(library(option), [option/2, option/3]).
+
+:- multifile
+    rewrite_host/3.                     % +HostIn, -Host, +Socket
 
 /** <module> Network socket (TCP and UDP) library
 
@@ -93,7 +96,7 @@ simple as opening a file.  See also http_open/3.
 ==
 dump_swi_homepage :-
     setup_call_cleanup(
-        tcp_connect(www.swi-prolog.org:http, Stream, []),
+        tcp_connect('www.swi-prolog.org':http, Stream, []),
         ( format(Stream,
                  'GET / HTTP/1.1~n\c
                   Host: www.swi-prolog.org~n\c
@@ -101,7 +104,7 @@ dump_swi_homepage :-
           flush_output(Stream),
           copy_stream_data(Stream, current_output)
         ),
-        close(S)).
+        close(Stream)).
 ==
 
 To   deal   with   timeouts   and     multiple   connections,   threads,
@@ -111,14 +114,15 @@ used.
 ## Server applications  {#socket-client}
 
 The typical sequence for generating a server application is given below.
-To close the server, use close/1 on `AcceptFd`.
+To close the server, use close/1 on the `StreamPair`.
 
   ==
   create_server(Port) :-
         tcp_socket(Socket),
         tcp_bind(Socket, Port),
         tcp_listen(Socket, 5),
-        tcp_open_socket(Socket, AcceptFd, _),
+        tcp_open_socket(Socket, StreamPair),
+        stream_pair(StreamPair, AcceptFd, _),
         <dispatch>
   ==
 
@@ -226,7 +230,7 @@ representation and the above defined address terms.
 %       One of `stream` (default) to create a TCP connection or
 %       `dgram` to create a UDP socket.
 %
-%   This   predicate   subsumes    tcp_socket/1m,   udp_socket/1   and
+%   This   predicate    subsumes   tcp_socket/1,    udp_socket/1   and
 %   unix_domain_socket/1.
 
 %!  tcp_socket(-SocketId) is det.
@@ -356,6 +360,29 @@ tcp_open_socket(Socket, Stream) :-
 %   If SocketId is an AF_UNIX socket (see unix_domain_socket/1), Address
 %   is an atom or string denoting a file name.
 
+tcp_connect(Socket, Host0:Port) =>
+    (   rewrite_host(Host0, Host, Socket)
+    ->  true
+    ;   Host = Host0
+    ),
+    tcp_connect_(Socket, Host:Port).
+tcp_connect(Socket, Address) =>
+    tcp_connect_(Socket, Address).
+
+%!  rewrite_host(+HostIn, -HostOut, +Socket) is nondet.
+%
+%   Allow rewriting the host for tcp_connect/2   and therefore all other
+%   predicates to connect a socket.
+%
+%   This hook is currently defined  in   Windows  to  map `localhost` to
+%   ip(127,0,0,1) as resolving `localhost`  on   Windows  is  often very
+%   slow. Note that we do not want to do that in general as a system may
+%   prefer to map `localhost` to `::1`, i.e., the IPv6 loopback address.
+
+:- if(current_prolog_flag(windows, true)).
+rewrite_host(localhost, ip(127,0,0,1), _).
+:- endif.
+
 
                  /*******************************
                  *      HOOKABLE CONNECT        *
@@ -467,17 +494,26 @@ tcp_connect_direct(Address, Socket, StreamPair) :-
 %   given,  perform  a  getaddrinfo()  call  to  obtain  the  relevant
 %   addresses.
 
-tcp_connect_direct(Host:Port, Socket, StreamPair, Options) :-
+tcp_connect_direct(Host0:Port, Socket, StreamPair, Options) :-
+    must_be(ground, Host0),
     \+ option(domain(_), Options),
     !,
+    (   rewrite_host(Host0, Host, Socket)
+    ->  true
+    ;   Host = Host0
+    ),
     State = error(_),
-    (   host_address(Host, Address, [type(stream)]),
-	socket_create(Socket, [domain(Address.domain)]),
+    (   (   is_ip(Host, Domain)
+        ->  IP = Host
+        ;   host_address(Host, Address, [type(stream)]),
+            Domain = Address.domain,
+            IP = Address.address
+        ),
+	socket_create(Socket, [domain(Domain)]),
 	E = error(_,_),
-	catch(connect_or_discard_socket(Socket, Address.address:Port,
-					StreamPair),
+	catch(connect_or_discard_socket(Socket, IP:Port, StreamPair),
 	      E, store_error_and_fail(State, E)),
-	debug(socket, '~p: connected to ~p', [Host, Address.address])
+	debug(socket, '~p: connected to ~p', [Host, IP])
     ->  true
     ;   arg(1, State, Error),
 	assertion(nonvar(Error)),
@@ -486,6 +522,9 @@ tcp_connect_direct(Host:Port, Socket, StreamPair, Options) :-
 tcp_connect_direct(Address, Socket, StreamPair, Options) :-
     make_socket(Address, Socket, Options),
     connect_or_discard_socket(Socket, Address, StreamPair).
+
+is_ip(ip(_,_,_,_), inet).
+is_ip(ip(_,_,_,_, _,_,_,_), inet6).
 
 connect_or_discard_socket(Socket, Address, StreamPair) :-
     setup_call_catcher_cleanup(

@@ -3,8 +3,9 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2001-2015, University of Amsterdam
+    Copyright (c)  2001-2025, University of Amsterdam
                               VU University Amsterdam
+			      SWI-Prolog Solutions b.v.
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -38,6 +39,7 @@
 #include <SWI-Prolog.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <assert.h>
 #include <errno.h>
 #ifdef O_PLMT
@@ -172,7 +174,7 @@ unify_memfile(term_t handle, memfile *mf)
 }
 
 
-static int
+static bool
 get_memfile(term_t handle, memfile **mfp)
 { PL_blob_t *type;
   void *data;
@@ -194,7 +196,7 @@ get_memfile(term_t handle, memfile **mfp)
     return FALSE;
   }
 
-  return PL_type_error("memory_file", handle);
+  return PL_type_error("memory_file", handle),false;
 }
 
 
@@ -508,7 +510,7 @@ seek64_memfile(void *handle, int64_t offset, int whence)
       errno = EINVAL;
       return -1;
   }
-  if ( offset < 0 || offset > (m->end - m->gap_size) )
+  if ( offset < 0 || offset > (int64_t)(m->end - m->gap_size) )
   { errno = EINVAL;
     return -1;
   }
@@ -589,7 +591,7 @@ atom_to_encoding(atom_t a)
 }
 
 
-static int
+static bool
 get_encoding(term_t t, IOENC *enc)
 { atom_t en;
 
@@ -597,20 +599,20 @@ get_encoding(term_t t, IOENC *enc)
   { IOENC encoding;
 
     if ( (encoding = atom_to_encoding(en)) == ENC_UNKNOWN )
-      return pl_error(NULL, 0, NULL, ERR_DOMAIN, t, "encoding");
+      return pl_error(NULL, 0, NULL, ERR_DOMAIN, t, "encoding"),false;
 
     *enc = encoding;
     return TRUE;
   }
 
-  return pl_error(NULL, 0, NULL, ERR_TYPE, t, "encoding");
+  return pl_error(NULL, 0, NULL, ERR_TYPE, t, "encoding"),false;
 }
 
 
 static foreign_t
 open_memory_file4(term_t handle, term_t mode, term_t stream, term_t options)
 { memfile *m;
-  int rc;
+  foreign_t rc;
 
   if ( get_memfile(handle, &m) )
   { int flags = SIO_FBUF|SIO_RECORDPOS|SIO_NOMUTEX;
@@ -782,7 +784,7 @@ get_size_mf(memfile *m, IOENC encoding, size_t *sizep)
 static foreign_t
 size_memory_file(term_t handle, term_t sizeh, term_t encoding)
 { memfile *m;
-  int rc;
+  foreign_t rc;
 
   if ( get_memfile(handle, &m) )
   { size_t size;
@@ -923,7 +925,7 @@ atom_to_memory_file(term_t atom, term_t handle)
 		 *	  DIRECT EXCHANGE	*
 		 *******************************/
 
-static int
+static foreign_t
 can_modify_memory_file(term_t handle, memfile *mf)
 { if ( mf->atom )
     return pl_error(NULL, 0, "read only",
@@ -1209,7 +1211,7 @@ mf_to_text(term_t handle, memfile *m, size_t from, size_t len,
 static foreign_t
 memory_file_to_text(term_t handle, term_t text, term_t encoding, int flags)
 { memfile *mf;
-  int rc;
+  foreign_t rc;
 
   if ( get_memfile(handle, &mf) )
   { rc = mf_to_text(handle, mf, NOSIZE, NOSIZE, text, encoding, flags);

@@ -64,22 +64,26 @@ typedef enum hash_algorithm
 
 
 		 /*******************************
-		 *	        MD5		*
+		 *		MD5		*
 		 *******************************/
 
 static int
 unify_digest(term_t t, unsigned char *digest, size_t len)
-{ char hex_output[len*2];
-  int di;
-  char *pi;
-  static char hexd[] = "0123456789abcdef";
+{ if ( len*2 <= 256 )
+  { char hex_output[256];
+    int di;
+    char *pi;
+    static char hexd[] = "0123456789abcdef";
 
-  for(pi=hex_output, di = 0; di < len; ++di)
-  { *pi++ = hexd[(digest[di] >> 4) & 0x0f];
-    *pi++ = hexd[digest[di] & 0x0f];
+    for(pi=hex_output, di = 0; di < len; ++di)
+    { *pi++ = hexd[(digest[di] >> 4) & 0x0f];
+      *pi++ = hexd[digest[di] & 0x0f];
+    }
+
+    return PL_unify_atom_nchars(t, len*2, hex_output);
+  } else
+  { return PL_representation_error("digest_length");
   }
-
-  return PL_unify_atom_nchars(t, len*2, hex_output);
 }
 
 
@@ -135,10 +139,10 @@ hash_append(hash_context *ctx, void *data, size_t size)
       md5_append(&ctx->state.md5, data, size);
       break;
     case ALGORITHM_SHA1:
-      sha1_hash(data, size, &ctx->state.sha1);
+      sha1_hash(data, (unsigned long)size, &ctx->state.sha1);
       break;
     default:
-      sha2_hash(data, size, &ctx->state.sha2);
+      sha2_hash(data, (unsigned long)size, &ctx->state.sha2);
       break;
   }
 }
@@ -393,7 +397,7 @@ pl_stream_hash(term_t stream, term_t hash)
 
 #define MKATOM(n) ATOM_ ## n = PL_new_atom(#n);
 
-void
+install_t
 install_hashstream(void)
 { MKATOM(md5);
   MKATOM(sha1);				/* =160 */

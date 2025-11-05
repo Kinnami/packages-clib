@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2002-2022, University of Amsterdam
+    Copyright (c)  2002-2023, University of Amsterdam
                               VU University Amsterdam
                               CWI, Amsterdam
                               SWI-Prolog Solutions b.v.
@@ -44,15 +44,21 @@
             directory_member/3,		% +Dir, -Member, +Options
             copy_file/2,                % +From, +To
             make_directory_path/1,      % +Directory
+            ensure_directory/1,         % +Directory
             copy_directory/2,           % +Source, +Destination
             delete_directory_and_contents/1, % +Dir
             delete_directory_contents/1 % +Dir
           ]).
-:- autoload(library(apply),[maplist/2,maplist/3,foldl/4]).
+:- autoload(library(apply), [maplist/2, maplist/3, foldl/4]).
 :- autoload(library(error),
-	    [permission_error/3,must_be/2,domain_error/2]).
-:- autoload(library(lists),[member/2]).
-:- autoload(library(nb_set),[empty_nb_set/1,add_nb_set/3]).
+            [ permission_error/3,
+              must_be/2,
+              domain_error/2,
+              instantiation_error/1
+            ]).
+:- autoload(library(lists), [member/2]).
+:- autoload(library(nb_set), [empty_nb_set/1, add_nb_set/3]).
+:- autoload(library(option), [dict_options/2]).
 
 
 /** <module> Extended operations on files
@@ -202,6 +208,7 @@ directory_file_path(Dir, File, Path) :-
     !,
     (   (   is_absolute_file_name(File)
         ;   Dir == '.'
+        ;   Dir == ''
         )
     ->  Path = File
     ;   sub_atom(Dir, _, _, 0, /)
@@ -212,7 +219,10 @@ directory_file_path(Dir, File, Path) :-
     nonvar(Path),
     !,
     (   nonvar(Dir)
-    ->  (   Dir == '.',
+    ->  (   (   Dir == '.'
+            ->  true
+            ;   Dir == ''
+            ),
             \+ is_absolute_file_name(Path)
         ->  File = Path
         ;   sub_atom(Dir, _, _, 0, /)
@@ -226,8 +236,8 @@ directory_file_path(Dir, File, Path) :-
     ;   file_directory_name(Path, Dir),
         file_base_name(Path, File)
     ).
-directory_file_path(_, _, _) :-
-    throw(error(instantiation_error(_), _)).
+directory_file_path(Dir, _, _) :-
+    instantiation_error(Dir).
 
 strip_trailing_slash(Dir0, Dir) :-
     (   atom_concat(D, /, Dir0),
@@ -271,7 +281,7 @@ strip_trailing_slash(Dir0, Dir) :-
 %   Nicos Angelopoulos.
 
 directory_member(Directory, Member, Options) :-
-    dict_create(Dict, options, Options),
+    dict_options(Dict, Options),
     (   Dict.get(recursive) == true,
         \+ Dict.get(follow_links) == false
     ->  empty_nb_set(Visited),
@@ -367,6 +377,9 @@ filter_dir_member(_, _, _).
 matches_type(directory, Entry) :-
     !,
     exists_directory(Entry).
+matches_type(regular, Entry) :-
+    !,
+    exists_file(Entry).
 matches_type(Type, Entry) :-
     \+ exists_directory(Entry),
     user:prolog_file_type(Ext, Type),
@@ -434,12 +447,33 @@ make_directory_path_2(Dir) :-
     !,
     file_directory_name(Dir, Parent),
     make_directory_path_2(Parent),
+    ensure_directory_(Dir).
+
+%!  ensure_directory(+Dir) is det.
+%
+%   Ensure the directory Dir exists.   Similar to make_directory_path/1,
+%   but creates at most one new directory,   i.e.,  the directory or its
+%   direct parent must exist.
+
+ensure_directory(Dir) :-
+    exists_directory(Dir),
+    !.
+ensure_directory(Dir) :-
+    atom_concat(RealDir, '/', Dir),
+    RealDir \== '',
+    !,
+    ensure_directory(RealDir).
+ensure_directory(Dir) :-
+    ensure_directory_(Dir).
+
+ensure_directory_(Dir) :-
     E = error(existence_error(directory, _), _),
     catch(make_directory(Dir), E,
           (   exists_directory(Dir)
           ->  true
           ;   throw(E)
           )).
+
 
 %!  copy_directory(+From, +To) is det.
 %

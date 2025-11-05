@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 project(swipl-clib)
 
 include("../cmake/PrologPackage.cmake")
@@ -61,7 +61,7 @@ clib_plugin(sha4pl
 	     C_SOURCES error.c sha4pl.c sha1/sha1.c sha1/sha2.c
 	               sha1/hmac_sha1.c sha1/hmac_sha256.c
 	     PL_LIBS sha.pl)
-test_libs(crypt memfile readutil stream uri)
+test_libs(crypt memfile readutil stream uri filesex)
 
 if(NOT EMSCRIPTEN)
 clib_plugin(cgi        C_SOURCES error.c form.c cgi.c PL_LIBS cgi.pl)
@@ -70,7 +70,7 @@ if(MULTI_THREADED)
 clib_plugin(time       C_SOURCES error.c time.c       PL_LIBS time.pl THREADED)
 test_libs(time)
 endif()
-clib_plugin(process    C_SOURCES error.c process.c    PL_LIBS process.pl)
+clib_plugin(process    C_SOURCES error.c process.c    PL_LIBS process.pl THREADED)
 clib_plugin(streaminfo C_SOURCES error.c streaminfo.c PL_LIBS streaminfo.pl)
 if(HAVE_MALLINFO)
 clib_plugin(mallocinfo C_SOURCES error.c mallocinfo.c PL_LIBS mallocinfo.pl)
@@ -106,7 +106,11 @@ if(MULTI_THREADED)
   test_libs(socket af_unix udp_sockets)
 endif()
 endif(HAVE_SOCKET)
+else(NOT EMSCRIPTEN)
+  swipl_plugin(uuid                                                                          PL_LIBS uuid.pl) 
 endif(NOT EMSCRIPTEN)
+
+test_libs(uuid)
 
 ################
 # Documentation

@@ -45,7 +45,7 @@
 :- autoload(library(backcomp),[thread_at_exit/1]).
 :- autoload(library(broadcast),
 	    [broadcast_request/1,broadcast/1,listening/3,listen/3]).
-:- autoload(library(debug),[debug/3]).
+:- use_module(library(debug),[debug/3]).
 :- autoload(library(error),
 	    [must_be/2,syntax_error/1,domain_error/2,existence_error/2]).
 :- autoload(library(option),[option/3]).
@@ -594,11 +594,13 @@ recreate_proxy(exception(Error)) :-
     recreate_on_error(Error),
     reload_inbound_proxy.
 
-recreate_on_error('$aborted').
+recreate_on_error('$aborted').          % old
+recreate_on_error(unwind(abort)).
 recreate_on_error(time_limit_exceeded).
 
 done_status_message_level(true, silent) :- !.
 done_status_message_level(exception('$aborted'), silent) :- !.
+done_status_message_level(exception(unwind(abort)), silent) :- !.
 done_status_message_level(_, informational).
 
 

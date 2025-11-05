@@ -293,8 +293,9 @@ The current library supports all 5 approved algorithms, both computing
 the hash-key from data and the \jargon{hash Message Authentication Code}
 (HMAC).
 
-A general secure hash interface is provided by \pllib{crypto}, part of
-the \href{http://www.swi-prolog.org/pldoc/package/ssl.html}{ssl~package}.
+A general comprehensive hash interface is provided by \pllib{crypto},
+part of the
+\href{http://www.swi-prolog.org/pldoc/package/ssl.html}{ssl~package}.
 
 Input is text, represented as an atom, packed string object or
 code-list. Note that these functions operate on byte-sequences and
@@ -347,6 +348,9 @@ character  codes.  \arg{HMAC}  is  unified  with   a  list  of  integers
 representing the authentication code. \arg{Options} is   the same as for
 sha_hash/3, but currently only \const{sha1} and \const{sha256} are
 supported.
+
+See also crypto_data_hash/3 from \pllib{crypto} library provided by
+the SSL package.
 
     \predicate{hash_atom}{2}{+Hash, -HexAtom}
 True when \arg{HexAtom} is the commonly used hexadecimal encoding of
@@ -426,7 +430,7 @@ Open the memory-file. \arg{Mode} is one of \const{read}, \const{write},
 \const{append}, \const{update} or \const{insert}. The resulting
 \arg{Stream} must be closed using close/1. When opened for
 \const{update} or \const{insert}, the current location is initialized
-at the start of the data and can be modified using seek/2 or
+at the start of the data and can be modified using seek/4 or
 set_stream_position/2.  In \const{update} mode, existing content is
 replaced, while the size is enlarged after hitting the end of the
 data.  In \const{insert} mode, the new data is inserted at the
@@ -444,7 +448,7 @@ Unicode text. In practice the only alternative is \const{octet}, turning
 the memoryfile into binary mode.  Please study SWI-Prolog Unicode and
 encoding issues before using this option.
     \termitem{free_on_close}{+Bool}
-If \const{true} (default \const{false} and the memory file is opened
+If \const{true} (default \const{false}) and the memory file is opened
 for reading, discard the file (see free_memory_file/1) if the input
 is closed.  This is used to realise open_chars_stream/2 in
 library(charsio).

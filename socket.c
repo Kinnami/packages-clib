@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2000-2023, University of Amsterdam
+    Copyright (c)  2000-2025, University of Amsterdam
                               VU University Amsterdam
 			      CWI, Amsterdam
 			      SWI-Prolog Solutions b.v.
@@ -37,6 +37,8 @@
 
 #define O_DEBUG 1
 
+#define _WINSOCK_DEPRECATED_NO_WARNINGS 1
+#define _CRT_SECURE_NO_WARNINGS 1
 #include <SWI-Prolog.h>
 #include <config.h>
 
@@ -53,6 +55,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <errno.h>
 #include <sys/types.h>
 #include <assert.h>
@@ -179,7 +182,7 @@ tcp_unify_socket(term_t handle, nbio_sock_t socket)
 }
 
 
-static int
+static bool
 tcp_get_socket(term_t handle, nbio_sock_t *sp)
 { PL_blob_t *type;
   void *data;
@@ -188,17 +191,17 @@ tcp_get_socket(term_t handle, nbio_sock_t *sp)
   { nbio_sock_t s = *(nbio_sock_t*)data;
 
     if ( !is_nbio_socket(s) )
-      return PL_existence_error("socket", handle);
+      return PL_existence_error("socket", handle),false;
 
     *sp = s;
 
-    return TRUE;
+    return true;
   }
 
   if ( get_socket_from_stream(handle, NULL, sp) )
-    return TRUE;
+    return true;
 
-  return PL_type_error("socket", handle);
+  return PL_type_error("socket", handle),false;
 }
 
 
@@ -608,13 +611,12 @@ get_as(term_t arg, int *asp)
 static foreign_t
 udp_receive(term_t Socket, term_t Data, term_t From, term_t options)
 { struct sockaddr_storage sockaddr;
-  socklen_t alen;
+  socklen_t alen = sizeof(sockaddr);
   nbio_sock_t socket;
   int flags = 0;
   char smallbuf[UDP_DEFAULT_BUFSIZE];
   char *buf = smallbuf;
   int bufsize = UDP_DEFAULT_BUFSIZE;
-  term_t varport = 0;
   ssize_t n;
   int as = PL_STRING;
   int rc;
@@ -651,8 +653,7 @@ udp_receive(term_t Socket, term_t Data, term_t From, term_t options)
       return FALSE;
   }
 
-  if ( !tcp_get_socket(Socket, &socket) ||
-       !nbio_get_sockaddr(socket, From, &sockaddr, &varport) )
+  if ( !tcp_get_socket(Socket, &socket) )
     return FALSE;
 
   if ( bufsize > UDP_DEFAULT_BUFSIZE )
@@ -662,7 +663,7 @@ udp_receive(term_t Socket, term_t Data, term_t From, term_t options)
 
   if ( (n=nbio_recvfrom(socket, buf, bufsize, flags,
 			(struct sockaddr*)&sockaddr, &alen)) == -1 )
-  { rc = nbio_error(GET_ERRNO, TCP_ERRNO);;
+  { rc = nbio_error(GET_ERRNO, TCP_ERRNO);
     goto out;
   }
 
@@ -1077,7 +1078,7 @@ install_socket(void)
 
   PL_register_foreign("tcp_accept",           3, pl_accept,           0);
   PL_register_foreign("tcp_bind",             2, pl_bind,             0);
-  PL_register_foreign("tcp_connect",          2, pl_connect,	      0);
+  PL_register_foreign("tcp_connect_",          2, pl_connect,	      0);
   PL_register_foreign("tcp_listen",           2, pl_listen,           0);
   PL_register_foreign("tcp_open_socket",      3, pl_open_socket,      0);
   PL_register_foreign("tcp_socket",           1, tcp_socket,          0);

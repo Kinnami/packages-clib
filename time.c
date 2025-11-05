@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2002-2022, University of Amsterdam
+    Copyright (c)  2002-2025, University of Amsterdam
                               VU University Amsterdam
 			      SWI-Prolog Solutions b.v.
     All rights reserved.
@@ -38,10 +38,12 @@
 //#define O_SAFE 1			/* extra safety checks */
 #include <config.h>
 
+#define _CRT_SECURE_NO_WARNINGS 1
 #include <SWI-Stream.h>
 #include <SWI-Prolog.h>
 #include "error.h"
 #include <stdlib.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <signal.h>
 #include <math.h>
@@ -57,7 +59,10 @@
 #endif
 
 #ifdef __WINDOWS__
+/* see https://stackoverflow.com/a/40844668/717069 */
 #undef ETIMEDOUT
+#define ETIMEDOUT_1 138			/* MSVC100 */
+#define ETIMEDOUT_2 10060		/* MSVC90 */
 #endif
 #include <pthread.h>
 
@@ -76,7 +81,7 @@ typedef enum
 #include <sys/timeb.h>
 #include <malloc.h>
 
-#ifndef WIN_PTHREADS
+#if 0
 struct timeval
 { long tv_sec;
   long tv_usec;
@@ -447,12 +452,12 @@ nextEvent(schedule *sched)
 
 
 typedef struct
-{ int		*bits;
+{ unsigned int *bits;
   size_t	size;
   size_t	high;
 } bitvector;
 
-#define BITSPERINT (8*sizeof(int))
+#define BITSPERINT (8*sizeof(unsigned int))
 
 static int
 set_bit(bitvector *v, size_t bit)
@@ -460,8 +465,8 @@ set_bit(bitvector *v, size_t bit)
   int bi = bit%BITSPERINT;
 
   while ( offset >= v->size )
-  { size_t osize = v->size * sizeof(int);
-    int *newbits = realloc(v->bits, osize*2);
+  { size_t osize = v->size * sizeof(*v->bits);
+    unsigned int *newbits = realloc(v->bits, osize*2);
 
     if ( !newbits )
       return FALSE;
@@ -474,11 +479,11 @@ set_bit(bitvector *v, size_t bit)
   { size_t ho = v->high/BITSPERINT;
     int    b  = v->high%BITSPERINT;
 
-    v->bits[ho] &= ~(1<<(b-1));
+    v->bits[ho] &= ~(1<<b);
     v->high++;
   }
 
-  v->bits[offset] |= 1<<(bi-1);
+  v->bits[offset] |= 1<<bi;
   return TRUE;
 }
 
@@ -489,7 +494,7 @@ is_set(bitvector *v, size_t bit)
   { size_t offset = bit/BITSPERINT;
     int bi = bit%BITSPERINT;
 
-    return (v->bits[offset] & (1<<(bi-1))) != 0;
+    return (v->bits[offset] & (1<<bi)) != 0;
   }
 
   return FALSE;
@@ -547,6 +552,13 @@ alarm_loop(void * closure)
     retry_timed_wait:
       DEBUG(1, Sdprintf("Waiting ...\n"));
       rc = pthread_cond_timedwait(&cond, &mutex, &timeout);
+
+#ifdef __WINDOWS__
+      // I rest my case.  Note that putting this in the switch
+      // is likely to result in a duplicate switch error.
+      if ( rc == ETIMEDOUT_1 || rc == ETIMEDOUT_2 )
+	rc = ETIMEDOUT;
+#endif
 
       switch( rc )
       { case ETIMEDOUT:
@@ -743,7 +755,7 @@ unify_timer(term_t t, Event ev)
 }
 
 
-static int
+static bool
 get_timer(term_t t, Event *ev)
 { if ( TheSchedule()->stop )
     return FALSE;
@@ -761,13 +773,13 @@ get_timer(term_t t, Event *ev)
         return TRUE;
       } else
       { return pl_error("get_timer", 1, NULL,
-			ERR_DOMAIN, t, "alarm");
+			ERR_DOMAIN, t, "alarm"),false;
       }
     }
   }
 
   return pl_error("get_timer", 1, NULL,
-		  ERR_ARGTYPE, 1, t, "alarm");
+		  ERR_ARGTYPE, 1, t, "alarm"),false;
 }
 
 

@@ -112,6 +112,7 @@ In the Unix version we simply call PL_dispatch() before doing recv() and
 leave the details to this function.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
+#define _CRT_SECURE_NO_WARNINGS 1
 #include <config.h>
 
 #if defined(__MINGW32__)
@@ -120,7 +121,7 @@ leave the details to this function.
 #define __finally
 #endif
 
-#if defined(__MINGW32__)
+#if defined(__WINDOWS__)
 #define WINVER 0x0501
 #include <ws2tcpip.h>
 #endif
@@ -155,7 +156,11 @@ leave the details to this function.
 #define closesocket(n) close((n))	/* same on Unix */
 #endif
 
-#ifndef __WINDOWS__
+#ifdef __WINDOWS__
+typedef int os_bufsize_t;
+#define strdup(s) _strdup(s)
+#else
+typedef size_t os_bufsize_t;
 #define INVALID_SOCKET -1
 #endif
 
@@ -175,15 +180,15 @@ leave the details to this function.
 #ifndef s6_addr16
 #if defined(s6_words)
 #define s6_addr16 s6_words
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
 #define s6_addr16 __u6_addr.__u6_addr16
 #endif
 #endif
 
 #define set(s, f)   ((s)->flags |= (f))
 #define clear(s, f) ((s)->flags &= ~(f))
-#define true(s, f)  ((s)->flags & (f))
-#define false(s, f) (!true(s, f))
+#define ison(s, f)  ((s)->flags & (f))
+#define isoff(s, f) (!ison(s, f))
 
 #define PLSOCK_MAGIC  0x38da3f2c
 #define PLSOCK_CMAGIC 0x38da3f2d
@@ -435,10 +440,10 @@ without dispatching if no input is available.
 
 static int
 wait_socket(plsocket *s)
-{ if ( true(s, PLSOCK_DISPATCH) )
+{ if ( ison(s, PLSOCK_DISPATCH) )
   { int fd = s->socket;
 
-    if ( true(s, PLSOCK_NONBLOCK) && !PL_dispatch(fd, PL_DISPATCH_INSTALLED) )
+    if ( ison(s, PLSOCK_NONBLOCK) && !PL_dispatch(s->input, PL_DISPATCH_INSTALLED) )
     {
 #ifdef HAVE_POLL
       struct pollfd fds[1];
@@ -465,7 +470,7 @@ wait_socket(plsocket *s)
     } else
     { int rc;
 
-      if ( !(rc = PL_dispatch(fd, PL_DISPATCH_WAIT)) )
+      if ( !(rc = PL_dispatch(s->input, PL_DISPATCH_WAIT)) )
 	errno = EPLEXCEPTION;
       return rc;
     }
@@ -906,7 +911,7 @@ nbio_closesocket(nbio_sock_t socket)
 
   clear(socket, PLSOCK_VIRGIN);
 
-  if ( true(socket, PLSOCK_OUTSTREAM|PLSOCK_INSTREAM) )
+  if ( ison(socket, PLSOCK_OUTSTREAM|PLSOCK_INSTREAM) )
   { int flags = socket->flags;		/* may drop out! */
 
     if ( flags & PLSOCK_INSTREAM )
@@ -1162,7 +1167,7 @@ nbio_get_sockaddr(nbio_sock_t socket,
 	case AF_INET6:
 	  if ( res->ai_family != AF_INET6 )
 	  { freeaddrinfo(res);
-	    return PL_warning("Expected ip4 address");
+	    return PL_warning("Expected ip6 address");
 	  }
 	  memcpy(&addr6->sin6_addr,
 		 &((struct sockaddr_in6*)res->ai_addr)->sin6_addr,
@@ -1335,16 +1340,11 @@ nbio_unify_addr(term_t t, struct sockaddr *addr)
 }
 
 int
-nbio_bind(nbio_sock_t socket, struct sockaddr *my_addr, size_t addrlen)
+nbio_bind(nbio_sock_t socket, struct sockaddr *my_addr, socklen_t addrlen)
 { VALID_SOCKET(socket);
 
-#ifdef __WINDOWS__
-  if ( bind(socket->socket, my_addr, (int)addrlen) )
-#else
   if ( bind(socket->socket, my_addr, addrlen) )
-#endif
-  {
-    nbio_error(GET_ERRNO, TCP_ERRNO);
+  { nbio_error(GET_ERRNO, TCP_ERRNO);
     return -1;
   }
 
@@ -1353,11 +1353,10 @@ nbio_bind(nbio_sock_t socket, struct sockaddr *my_addr, size_t addrlen)
   return 0;
 }
 
-
 int
 nbio_connect(nbio_sock_t socket,
 	     const struct sockaddr *serv_addr,
-	     size_t addrlen)
+	     socklen_t addrlen)
 { VALID_SOCKET(socket);
 
   for(;;)
@@ -1431,7 +1430,7 @@ nbio_accept(nbio_sock_t master, struct sockaddr *addr, socklen_t *addrlen)
   s = allocSocket(slave);
   s->flags |= PLSOCK_ACCEPT;
 #ifndef __WINDOWS__
-  if ( true(s, PLSOCK_NONBLOCK) )
+  if ( ison(s, PLSOCK_NONBLOCK) )
     nbio_setopt(s, TCP_NONBLOCK);
 #endif
 
@@ -1473,7 +1472,7 @@ nbio_read(nbio_sock_t socket, char *buf, size_t bufSize)
       return -1;
 #endif
 
-    n = recv(socket->socket, buf, bufSize, 0);
+    n = recv(socket->socket, buf, (os_bufsize_t)bufSize, 0);
 
     if ( n == -1 )
     { if ( need_retry(GET_ERRNO) )
@@ -1508,7 +1507,7 @@ nbio_write(nbio_sock_t socket, char *buf, size_t bufSize)
   while( len > 0 )
   { int n;
 
-    n = send(socket->socket, str, len, 0);
+    n = send(socket->socket, str, (os_bufsize_t)len, 0);
     if ( n < 0 )
     { if ( need_retry(GET_ERRNO) )
       { if ( PL_handle_signals() < 0 )
@@ -1571,11 +1570,11 @@ nbio_close_input(nbio_sock_t socket)
 
   DEBUG(2, Sdprintf("[%d]: nbio_close_input(%p, flags=0x%x)\n",
 		    PL_thread_self(), socket, socket->flags));
-  if ( true(socket, PLSOCK_INSTREAM) )
+  if ( ison(socket, PLSOCK_INSTREAM) )
   { clear(socket, PLSOCK_INSTREAM);
 
     socket->input = NULL;
-    if ( false(socket, (PLSOCK_INSTREAM|PLSOCK_OUTSTREAM)) )
+    if ( isoff(socket, (PLSOCK_INSTREAM|PLSOCK_OUTSTREAM)) )
       rc = closeSocket(socket);
 
     if ( socket->symbol )
@@ -1603,7 +1602,7 @@ nbio_close_output(nbio_sock_t socket)
   DEBUG(2, Sdprintf("[%d]: nbio_close_output(%p, flags=0x%x)\n",
 		    PL_thread_self(), socket, socket->flags));
 
-  if ( true(socket, PLSOCK_OUTSTREAM) )
+  if ( ison(socket, PLSOCK_OUTSTREAM) )
   { clear(socket, PLSOCK_OUTSTREAM);
 
     if ( socket->socket != INVALID_SOCKET )
@@ -1613,7 +1612,7 @@ nbio_close_output(nbio_sock_t socket)
     }
 
     socket->output = NULL;
-    if ( false(socket, (PLSOCK_INSTREAM|PLSOCK_OUTSTREAM)) )
+    if ( isoff(socket, (PLSOCK_INSTREAM|PLSOCK_OUTSTREAM)) )
       rc = (rc + closeSocket(socket)) ? -1 : 0;
 
     if ( socket->symbol )
@@ -1642,7 +1641,7 @@ nbio_recvfrom(nbio_sock_t socket, void *buf, size_t bufSize, int flags,
       return -1;
 #endif
 
-    n = recvfrom(socket->socket, buf, bufSize, flags, from, fromlen);
+    n = recvfrom(socket->socket, buf, (os_bufsize_t)bufSize, flags, from, fromlen);
 
     if ( n == -1 )
     { if ( need_retry(GET_ERRNO) )
@@ -1678,7 +1677,7 @@ nbio_sendto(nbio_sock_t socket, void *buf, size_t bufSize, int flags,
   VALID_SOCKET(socket);
 
   for(;;)
-  { n = sendto(socket->socket, buf, bufSize, flags, to, tolen);
+  { n = sendto(socket->socket, buf, (os_bufsize_t)bufSize, flags, to, tolen);
 
     if ( n < 0 )
     { if ( need_retry(GET_ERRNO) )
